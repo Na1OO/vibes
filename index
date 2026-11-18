@@ -84,10 +84,10 @@ import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
 
 // 1) Вставь сюда конфиг из Firebase (Project settings → Your apps → Web app)
 const firebaseConfig = {
-  apiKey: "ВСТАВЬ",
-  authDomain: "ВСТАВЬ.firebaseapp.com",
-  projectId: "ВСТАВЬ",
-  appId: "ВСТАВЬ"
+  apiKey: "AIzaSyAfZ5DbDx2RSSR2yTrpcRH2eI9PcveeYpo",
+  authDomain: "nastyavibes.firebaseapp.com",
+  projectId: "nastyavibes",
+  appId: "1:84542460295:web:004d9f0ed68fb9716ac322"
 };
 // 2) Почта служебного пользователя Насти (создаётся в Firebase Authentication).
 //    Её пароль и есть секретное слово. Эта же почта указана в правилах Firestore.
