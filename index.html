@@ -7,12 +7,12 @@
 <style>
 :root{--bg:#fff5f7;--card:#fff;--text:#3a2a30;--muted:#9a8890;--track:#f0e3e7;--accent:#e85d8a;color-scheme:light;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1519;--card:#2a1f25;--text:#f6e9ee;--muted:#a8939c;--track:#3a2c33;--accent:#ff7aa5;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#1d1519;--card:#2a1f25;--text:#f6e9ee;--muted:#a8939c;--track:#3a2c33;--accent:#ff7aa5;color-scheme:dark}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1519;--card:#2a1f25;--text:#f6e9ee;--muted:#a8939c;--track:#3a2c33;--accent:#ff7aa5;color-scheme:dark}}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
 .card{background:var(--card);border-radius:28px;padding:28px 24px;width:100%;max-width:420px;text-align:center;box-shadow:0 8px 30px rgba(232,93,138,.15)}
 h1{font-size:1.5rem;margin:0 0 4px}
+#secret{cursor:inherit;-webkit-tap-highlight-color:transparent;user-select:none}
 .sub{color:var(--muted);font-size:.9rem;margin:0 0 12px}
 svg{width:100%;height:auto}
 #needle{transition:transform 1s cubic-bezier(.3,1.4,.5,1);transform-origin:150px 150px}
@@ -20,7 +20,6 @@ svg{width:100%;height:auto}
 .label{font-size:1.25rem;font-weight:600;margin:6px 0 2px}
 .note{color:var(--muted);font-size:.95rem;min-height:1.2em}
 .upd{color:var(--muted);font-size:.75rem;margin-top:10px}
-#secret{cursor:inherit;-webkit-tap-highlight-color:transparent;user-select:none}
 #hist{margin-top:18px;padding-top:14px;border-top:1px dashed var(--track);display:none}
 #hist h2{font-size:1rem;margin:0 0 10px;color:var(--muted);font-weight:600}
 #bars{display:flex;align-items:flex-end;gap:4px;height:70px;margin-bottom:10px}
@@ -36,6 +35,7 @@ svg{width:100%;height:auto}
 .presets button{font-size:1.6rem;background:var(--bg);border:1px solid var(--track);border-radius:14px;padding:6px 10px;cursor:pointer}
 #save{margin-top:12px;width:100%;padding:12px;border:0;border-radius:14px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
 .msg{font-size:.8rem;color:var(--muted);margin-top:8px;min-height:1em}
+#out{background:none;border:0;color:var(--muted);font-size:.75rem;cursor:pointer;margin-top:6px;text-decoration:underline}
 </style>
 </head>
 <body>
@@ -71,9 +71,18 @@ svg{width:100%;height:auto}
     <input type="text" id="text" maxlength="80" placeholder="Пара слов от себя (необязательно)">
     <button id="save">Сохранить настроение</button>
     <div class="msg" id="msg"></div>
+    <button id="out">Выйти</button>
   </section>
 </main>
 
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getDatabase, ref, push, query, orderByChild, limitToLast, onValue }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+// 1) Вставь сюда конфиг из Firebase (Project settings → Your apps → Web app)
 const firebaseConfig = {
   apiKey: "AIzaSyAfZ5DbDx2RSSR2yTrpcRH2eI9PcveeYpo",
   authDomain: "nastyavibes.firebaseapp.com",
@@ -81,7 +90,11 @@ const firebaseConfig = {
   projectId: "nastyavibes",
   appId: "1:84542460295:web:004d9f0ed68fb9716ac322"
 };
+// 2) Почта служебного пользователя Насти (создаётся в Firebase Authentication).
+//    Её пароль и есть секретное слово. Эта же почта указана в правилах Realtime Database.
 const NASTYA_EMAIL = "salminiya.96@gmail.com";
+// true: при неудачном входе покажет код ошибки. Когда всё заработает, поставь false.
+const DEBUG = true;
 
 const MOODS = [
   {max:20, e:"😡", t:"Лучше не трогать"},
@@ -92,41 +105,23 @@ const MOODS = [
 ];
 const $ = id => document.getElementById(id);
 const moodOf = v => MOODS.find(m => v < m.max);
+const clamp = v => Math.max(0, Math.min(100, Number(v)));
+const fmt = ts => new Date(ts).toLocaleString("ru-RU", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
 
 function render(d){
-  const v = Math.max(0, Math.min(100, Number(d.value)));
-  const m = moodOf(v);
+  const v = clamp(d.value), m = moodOf(v);
   $("needle").style.transform = "rotate(" + (v * 1.8 - 90) + "deg)";
   $("emoji").textContent = m.e;
   $("label").textContent = m.t;
   $("note").textContent = d.note || "";
-  $("upd").textContent = d.ts ? "Обновлено: " + new Date(d.ts).toLocaleString("ru-RU", {day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"}) : "";
+  $("upd").textContent = d.ts ? "Обновлено: " + fmt(d.ts) : "";
 }
 
-// Подвал: стрелка в нейтральном положении, пока данных нет
-$("label").textContent = "Настя ещё не отметилась";
-$("emoji").textContent = "🤔";
-
-let ref = null;
-(async () => {
-  try {
-    const db = await claude.use("db");
-    if (!db) { $("label").textContent = "Нужно войти, чтобы увидеть шкалу"; return; }
-    ref = db.doc("mood/current");
-    ref.onSnapshot(s => { if (s.exists) render(s.data()); }, () => {});
-    ref.collection("history").orderBy("ts", "desc").limit(14)
-      .onSnapshot(qs => renderHist(qs.docs.map(d => d.data())), () => {});
-  } catch (e) { $("label").textContent = "Не получилось загрузить"; }
-})();
-
 function renderHist(list){
-  if (!list.length) { $("hist").style.display = "none"; return; }
-  $("hist").style.display = "block";
-  const fmt = ts => new Date(ts).toLocaleString("ru-RU", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"});
+  $("hist").style.display = list.length ? "block" : "none";
   $("bars").textContent = "";
   list.slice().reverse().forEach(h => {
-    const v = Math.max(0, Math.min(100, Number(h.value)));
-    const b = document.createElement("div");
+    const v = clamp(h.value), b = document.createElement("div");
     b.style.height = Math.max(8, v * 0.7) + "px";
     b.style.background = "hsl(" + Math.round(v * 1.2) + ",70%,52%)";
     b.title = fmt(h.ts) + " — " + moodOf(v).t;
@@ -134,8 +129,7 @@ function renderHist(list){
   });
   $("items").textContent = "";
   list.slice(0, 7).forEach(h => {
-    const v = Math.max(0, Math.min(100, Number(h.value)));
-    const li = document.createElement("li");
+    const v = clamp(h.value), li = document.createElement("li");
     const e = document.createElement("span"); e.textContent = moodOf(v).e;
     const d = document.createElement("span"); d.className = "d"; d.textContent = fmt(h.ts);
     const n = document.createElement("span"); n.className = "n"; n.textContent = h.note || moodOf(v).t;
@@ -144,23 +138,44 @@ function renderHist(list){
   });
 }
 
-// --- Режим Насти ---
-function openPanel(){
-  $("panel").style.display = "block";
-  const cur = Number($("range").value);
-  $("range").value = cur;
-}
-function isNastya(){ try { return localStorage.getItem("nastya") === "1"; } catch(e){ return false; } }
-if (isNastya()) openPanel();
+$("label").textContent = "Настя ещё не отметилась";
+$("emoji").textContent = "🤔";
 
-$("secret").addEventListener("click", () => {
-  if (isNastya()) { openPanel(); return; }
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const auth = getAuth(app);
+
+onValue(
+  query(ref(db, "moods"), orderByChild("ts"), limitToLast(14)),
+  snap => {
+    const list = [];
+    snap.forEach(c => { list.push(c.val()); });
+    list.sort((a, b) => b.ts - a.ts);
+    if (list.length) render(list[0]);
+    renderHist(list);
+  },
+  () => { $("label").textContent = "Не получилось загрузить"; }
+);
+
+// --- Режим Насти ---
+onAuthStateChanged(auth, user => {
+  $("panel").style.display = (user && user.email === NASTYA_EMAIL) ? "block" : "none";
+});
+
+$("secret").addEventListener("click", async () => {
+  if (auth.currentUser) return;
   const w = prompt("Кто здесь? Секретное слово:");
-  if (w && w.trim().toLowerCase() === SECRET.toLowerCase()) {
-    try { localStorage.setItem("nastya", "1"); } catch(e){}
-    openPanel();
+  if (!w) return;
+  const pw = w.trim();
+  try {
+    await signInWithEmailAndPassword(auth, NASTYA_EMAIL, pw);
+  } catch (e) {
+    try { await signInWithEmailAndPassword(auth, NASTYA_EMAIL, pw.toLowerCase()); }
+    catch (e2) { if (DEBUG) alert("Не получилось войти: " + (e2.code || e2.message)); }
   }
 });
+
+$("out").addEventListener("click", () => signOut(auth));
 
 [["😡",10],["😔",30],["😐",50],["🙂",70],["🥰",90]].forEach(([e, v]) => {
   const b = document.createElement("button");
@@ -170,14 +185,15 @@ $("secret").addEventListener("click", () => {
 });
 
 $("save").addEventListener("click", async () => {
-  if (!ref) { $("msg").textContent = "Нет связи с хранилищем"; return; }
   try {
-    const entry = {value: Number($("range").value), note: $("text").value.trim(), ts: Date.now()};
-    await ref.set(entry);
-    await ref.collection("history").doc(String(entry.ts)).set(entry);
+    await push(ref(db, "moods"), {
+      value: Number($("range").value),
+      note: $("text").value.trim(),
+      ts: Date.now()
+    });
     $("text").value = "";
     $("msg").textContent = "Сохранено ✔";
-  } catch (e) { $("msg").textContent = "Не удалось сохранить (нет прав на запись)"; }
+  } catch (e) { $("msg").textContent = "Не удалось сохранить: " + (e.code || e.message || "ошибка"); }
 });
 </script>
 </body>
